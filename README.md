@@ -32,33 +32,33 @@ t=68.111 pos[0]=+0.054 vel[0]=+0.278 tau[0]=+0.057
 
 DESIGN DECISIONS
 
-- Shared interface, swappable backend. MockCANReader and LiveCANReader are interchangeable — swapping one line in main.py (not built here) is the only change needed when hardware becomes available. This was the highest-leverage decision for a take-home with uncertain hardware access: it means none of the sync/storage/dashboard logic would need to change later.
+- Shared interface, swappable backend. MockCANReader and LiveCANReader are interchangeable so swapping one line in main.py (not built here) is the only change needed when hardware becomes available. This was the decision for a take home with no hardware access because it means none of the sync/storage/dashboard logic would need to change later.
 
-- Push and pull both supported. register_callback() lets the multi-camera sync layer (Task 3) subscribe to new joint states as they arrive, while read_joint_state() lets the dashboard (Task 5) poll on its own refresh cycle without blocking.
+- Push and pull both supported. register_callback() lets the multi-camera sync layer (Task 3) are related to new joint states as they arrive, while read_joint_state() lets the dashboard (Task 5) poll on its own refresh cycle without blocking.
 
 - Per-bus readers. OpenArm 2.0 is bimanual (can0/can1), so each CANReader instance is scoped to one bus/arm; a coordinator would run two readers in parallel.
 
-- Callback-mode discipline. The LiveCANReader explicitly sets CallbackMode.STATE before polling, per the docs' warning that callback mode must match the type of frame being received (STATE for control/state, PARAM for parameter queries).
+- Callback mode discipline. The LiveCANReader explicitly sets CallbackMode.STATE before polling, per the docs' warning that callback mode must match the type of frame being received (STATE for control/state, PARAM for parameter queries).
 
-- Timeout choices. recv_all(300) (300 µs) is used in the live reader's poll loop, matching the docs' recommendation for fast control-cycle operations; recv_all(2000) is used during the one-time enable_all() / init sequence, matching the guidance for slower setup operations.
+- Timeout choices. recv_all(300) (300 µs) is used in the live reader's poll loop, matching the docs' recommendation for fast control-cycle operations; recv_all(2000) is used during the one time enable_all() / init sequence, matching the guidance for slower setup operations.
 
 KEY TRADE OFFS : 
 
 Sinusoidal mock trajectories vs. recorded real demo data 
--> Simpler, deterministic, easy to verify by eye — but doesn't capture real contact dynamics, sensor noise characteristics, or torque spikes from a real teleop session.
+-> Simple and easier to verify by eye but doesn't capture real contact dynamics, sensor noise characteristics or torque spikes from a real teleop session.
 
 Polling thread per reader vs. asyncio
--> Threads are simpler to reason about, and SocketCAN's blocking recv_all maps naturally to a dedicated thread per bus. Asyncio would scale better with many concurrent I/O sources (cameras + 2 CAN buses + REST API), which matters more once Tasks 3-5 are built.
+-> Threads are simpler, and SocketCAN's blocking recv_all maps naturally to a dedicated thread per bus. Asyncio would scale better with many concurrent I/O sources (cameras + 2 CAN buses + REST API), which matters more once Tasks 3-5 are built.
 
 Raising on missing openarm_can vs. silently falling back to mock
--> Made the live/mock boundary explicit and loud, so a partially-configured machine doesn't silently record fake data thinking it's real.
+-> Made the live/mock boundary explicit and loud, so a partially configured machine doesn't silently record fake data thinking it's real.
 
 
 WHAT I'D DO NEXT : 
 
-- Task 3 (camera sync): Tag every JointState and camera frame with a shared monotonic timestamp at capture time; run cameras at their native rates (wrist Arducams and ceiling likely 30-60 Hz, ZED at its own rate) and resample/interpolate joint state to each frame's timestamp rather than trying to force all sensors to a common clock. For the 1 kHz joint stream, the nearest or linearly-interpolated joint state at each frame timestamp is sufficient given the difference in sensor bandwidths.
+- Task 3 (camera sync): Tag every JointState and camera frame with a shared monotonic timestamp at capture time; run cameras at their native rates (wrist Arducams and ceiling likely 30-60 Hz, ZED at its own rate) and resample/interpolate joint state to each frame's timestamp rather than trying to force all sensors to a common clock. For the 1 kHz joint stream, the nearest or linearly-interpolated joint state at each frame timestamp is enough, given the difference in sensor bandwidths.
 
-- Task 4 (storage): HDF5 per episode — one dataset per joint signal plus one dataset per camera (compressed video or chunked image arrays), with episode-level JSON metadata (duration, task label, success flag). HDF5 is well-supported in the robot learning ecosystem (LeRobot, RLDS converters) and supports partial/streaming reads, which matters for a REST API that serves individual episodes without loading the whole file.
+- Task 4 (storage): HDF5 per episode -> one dataset per joint signal plus one dataset per camera (compressed video or chunked image arrays), with episode-level JSON metadata (duration, task label, success flag). HDF5 is well-supported in the robot learning ecosystem (LeRobot, RLDS converters) and supports partial/streaming reads, which matters for a REST API that serves individual episodes without loading the whole file.
 
 - Task 5 (dashboard): A small FastAPI + WebSocket backend streaming JointState and downsampled camera frames to a lightweight React/Plotly frontend, with Start/Stop wired to the episode writer from Task 4.
 
